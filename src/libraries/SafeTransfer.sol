@@ -2,10 +2,12 @@
 pragma solidity ^0.8.20;
 
 library SafeTransfer {
-    error TransferFailed(address recipient, uint256 amount);
+    error ETHTransferFailed(address recipient, uint256 amount);
 
     function safeTransferETH(address recipient, uint256 amount) internal {
+
         (bool ok,) = recipient.call{value: amount}("");
-        if (!ok) revert TransferFailed(recipient, amount);
+        
+        if (!ok) revert ETHTransferFailed(recipient, amount);
     }
 }

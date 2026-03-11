@@ -2,14 +2,15 @@
 pragma solidity ^0.8.20;
 
 import {IMerkleDist} from "../interfaces/IMerkleDist.sol";
-import {SafeTransfer} from "../libraries/SafeTransfer.sol";
+import {SafeToken} from "../libraries/SafeToken.sol";
 
 abstract contract MerkleDist is IMerkleDist {
-    using SafeTransfer for address;
+    using SafeToken for address;
 
     uint256 public currentRound;
     bytes32 public merkleRoot;
     address public merkleAdmin;
+    address public rewardToken;
 
     mapping(uint256 => mapping(address => bool)) private _claimed;
 
@@ -17,6 +18,7 @@ abstract contract MerkleDist is IMerkleDist {
     error InvalidProof();
     error ZeroRoot();
     error NotMerkleAdmin();
+    error ZeroToken();
 
     function setMerkleRoot(bytes32 root) external virtual override {
 
@@ -27,9 +29,16 @@ abstract contract MerkleDist is IMerkleDist {
 
     function _setMerkleAdmin(address admin) internal {
 
-        require(admin != address(0), "zero admin");
+        require(admin != address(0), "Address zero detected");
 
         merkleAdmin = admin;
+    }
+
+    function _setRewardToken(address token) internal {
+
+        if (token == address(0)) revert ZeroToken();
+
+        rewardToken = token;
     }
 
     function _setMerkleRoot(bytes32 root) internal {
@@ -57,7 +66,7 @@ abstract contract MerkleDist is IMerkleDist {
 
         emit Claimed(round, msg.sender, amount);
 
-        msg.sender.safeTransferETH(amount);
+        rewardToken.safeTransfer(msg.sender, amount);
     }
 
     function hasClaimed(uint256 round, address account) external view returns (bool) {
@@ -74,7 +83,7 @@ abstract contract MerkleDist is IMerkleDist {
             computed =
                 computed < p ? keccak256(abi.encodePacked(computed, p)) : keccak256(abi.encodePacked(p, computed));
         }
-        
+
         return computed == merkleRoot;
     }
 }

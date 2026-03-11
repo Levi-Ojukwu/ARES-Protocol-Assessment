@@ -2,8 +2,11 @@
 pragma solidity ^0.8.20;
 
 import {IGovernance} from "../interfaces/IGovernance.sol";
+import {SafeTransfer} from "../libraries/SafeTransfer.sol";
 
 abstract contract Governance is IGovernance {
+    using SafeTransfer for address;
+
     uint256 public constant maxDailyBps = 1000; // 10%
     uint256 public constant PROPOSAL_DEPOSIT = 0.01 ether;
 
@@ -24,6 +27,7 @@ abstract contract Governance is IGovernance {
     }
 
     function checkDailyLimit(uint256 amount) public view returns (bool) {
+
         uint256 today = block.timestamp / 1 days;
 
         uint256 snapshotBalance = _dailyBalanceSnapshot[today];
@@ -50,20 +54,20 @@ abstract contract Governance is IGovernance {
     }
 
     function _lockDeposit(uint256 proposalId, address proposer) internal {
+
         if (msg.value < PROPOSAL_DEPOSIT) revert DepositRequired();
 
         proposalDepositor[proposalId] = proposer;
     }
 
     function _returnDeposit(uint256 proposalId) internal {
+
         address depositor = proposalDepositor[proposalId];
 
         if (depositor == address(0)) return;
 
         proposalDepositor[proposalId] = address(0);
 
-        (bool ok,) = depositor.call{value: PROPOSAL_DEPOSIT}("");
-        
-        if (!ok) revert DepositReturnFailed();
+        depositor.safeTransferETH(PROPOSAL_DEPOSIT);
     }
 }

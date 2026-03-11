@@ -2,8 +2,17 @@
 pragma solidity ^0.8.20;
 
 import "../interfaces/IProposalControl.sol";
+import {Governance} from "../modules/Governance.sol";
+import {MerkleDist} from "../modules/MerkleDist.sol";
+import {SigAuth} from "../modules/SigAuth.sol";
+import {SafeToken} from "../libraries/SafeToken.sol";
+import {SafeTransfer} from "../libraries/SafeTransfer.sol";
+import {AresToken} from "./AresToken.sol";
 
-contract ProposalControl is IProposalControl {
+contract ProposalControl is IProposalControl, Governance, MerkleDist, SigAuth {
+    using SafeToken    for address;
+    using SafeTransfer for address;
+    
     error WRONG_STATE();
     error ALREADY_EXECUTED();
     error UPGRADE_VALUE_FORBIDDEN();
@@ -13,8 +22,10 @@ contract ProposalControl is IProposalControl {
     error UPGRADE_DATA_REQUIRED();
     error NOT_PROPOSER();
     error WRONG_DEPOSIT();
-    error NOT_ENOUGH_CONFIRMATIONS();
     error NOT_GOVERNOR();
+    error INVALID_GOVERNOR();
+    error DUPLICATE_GOVERNOR();
+    error REENTRANCY();
 
     struct Proposal {
         address target;
@@ -32,13 +43,27 @@ contract ProposalControl is IProposalControl {
     address[] public governors;
     uint256 public threshold;
     uint256 public proposalCount;
+    AresToken  public aresToken;
 
     mapping(address => bool) public isGovernor;
     mapping(uint256 => mapping(address => bool)) public confirmed;
     mapping(uint256 => Proposal) public proposals;
 
+    uint256 private _status;
+
     uint256 public constant TIMELOCK_DURATION = 1 hours;
-    uint256 public constant PROPOSAL_DEPOSIT = 0.01 ether;
+
+    modifier onlyGovernor() {
+        if (!isGovernor[msg.sender]) revert NOT_GOVERNOR();
+        _;
+    }
+
+    modifier nonReentrant() {
+        if (_status == 2) revert REENTRANCY();
+        _status = 2;
+        _;
+        _status = 1;
+    }
 
     constructor(address[] memory _governors, uint256 _threshold) payable {
         require(_governors.length > 0, "no governors");
@@ -49,16 +74,18 @@ contract ProposalControl is IProposalControl {
 
         for (uint256 i = 0; i < _governors.length; i++) {
             address g = _governors[i];
-            require(g != address(0), "zero address governor");
-            require(!isGovernor[g], "duplicate governor");
+            if (g == address(0)) revert INVALID_GOVERNOR();
+            if (isGovernor[g])   revert DUPLICATE_GOVERNOR();
             isGovernor[g] = true;
             governors.push(g);
         }
-    }
 
-    modifier onlyGovernor() {
-        if (!isGovernor[msg.sender]) revert NOT_GOVERNOR();
-        _;
+        aresToken = new AresToken(address(this));
+
+        _setRewardToken(address(aresToken));
+
+        _setMerkleAdmin(address(this));
+
     }
 
     function submitProposal(address _target, uint256 _value, bytes calldata _data, ActionType _actionType)
@@ -91,6 +118,8 @@ contract ProposalControl is IProposalControl {
             actionType: _actionType
         });
 
+        _lockDeposit(id, msg.sender);
+
         confirmed[id][msg.sender] = true;
 
         proposals[id].confirmations = 1;
@@ -103,7 +132,6 @@ contract ProposalControl is IProposalControl {
 
         emit ProposalSubmitted(id, msg.sender);
         
-        return id;
     }
 
     function confirmProposal(uint256 proposalId) public onlyGovernor {
@@ -127,7 +155,7 @@ contract ProposalControl is IProposalControl {
         emit ProposalConfirmed(proposalId, msg.sender);
     }
 
-    function executeProposal(uint256 proposalId) external virtual onlyGovernor {
+    function executeProposal(uint256 proposalId) external virtual onlyGovernor nonReentrant {
 
         Proposal storage prop = proposals[proposalId];
 
@@ -139,15 +167,20 @@ contract ProposalControl is IProposalControl {
 
         prop.state = ProposalState.Executed;
 
-        (bool success,) = prop.target.call{value: prop.value}(prop.data);
-
-        require(success, "execution failed");
-
-        (bool refund,) = prop.proposer.call{value: prop.deposit}("");
-
-        require(refund, "deposit refund failed");
+        _returnDeposit(proposalId);
 
         emit ProposalExecuted(proposalId);
+
+        if (prop.actionType == ActionType.Transfer) {
+            aresToken.mint(prop.target, prop.value);
+
+        } else if (prop.actionType == ActionType.Call) {
+            (bool success,) = prop.target.call{value: 0}(prop.data);
+            require(success, "call execution failed");
+
+        } else if (prop.actionType == ActionType.Upgrade) {
+            aresToken.setMinter(prop.target);
+        }
     }
 
     function cancelProposal(uint256 proposalId) public onlyGovernor {
@@ -161,11 +194,16 @@ contract ProposalControl is IProposalControl {
 
         prop.state = ProposalState.Cancelled;
 
-        (bool refund,) = prop.proposer.call{value: prop.deposit}("");
-        
-        require(refund, "deposit return failed");
+        _returnDeposit(proposalId);
 
         emit ProposalCancelled(proposalId);
+    }
+
+    function setMerkleRoot(bytes32 root) external override {
+
+        if (msg.sender != merkleAdmin) revert NotMerkleAdmin();
+
+        _setMerkleRoot(root);
     }
 
     function getState(uint256 proposalId) public view returns (ProposalState) {

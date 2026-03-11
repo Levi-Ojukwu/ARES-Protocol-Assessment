@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {ISigAuth} from "../interfaces/ISigAuth.sol";
 
 abstract contract SigAuth is ISigAuth {
+
     bytes32 public immutable DOMAIN_SEPARATOR;
 
     bytes32 public constant ACTION_TYPEHASH = keccak256("SignedAction(address signer,bytes32 action,uint256 nonce)");
@@ -12,6 +13,7 @@ abstract contract SigAuth is ISigAuth {
 
     error InvalidSignature();
     error SignatureMalleability();
+    error InvalidV();
 
     constructor() {
         DOMAIN_SEPARATOR = keccak256(
@@ -60,9 +62,9 @@ abstract contract SigAuth is ISigAuth {
         return keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
     }
 
-    function _recover(bytes32 digest, bytes calldata sig) internal pure returns (address) {
+    function _recover(bytes32 digest, bytes calldata signature) internal pure returns (address) {
 
-        if (sig.length != 65) revert InvalidSignature();
+        if (signature.length != 65) revert InvalidSignature();
 
         bytes32 r;
 
@@ -70,18 +72,26 @@ abstract contract SigAuth is ISigAuth {
 
         uint8 v;
 
+        bytes memory sig = signature;
+
         assembly {
-            r := calldataload(sig.offset)
-            s := calldataload(add(sig.offset, 32))
-            v := byte(0, calldataload(add(sig.offset, 64)))
+            r := mload(add(sig, 32))
+            s := mload(add(sig, 64))
+            v := byte(0, mload(add(sig, 96)))
         }
 
         if (v < 27) v += 27;
 
+        if (v != 27 && v != 28) revert InvalidV();
+
         if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
             revert SignatureMalleability();
         }
+        
+        address recovered = ecrecover(digest, v, r, s);
 
-        return ecrecover(digest, v, r, s);
+        if (recovered == address(0)) revert InvalidSignature();
+
+        return recovered;
     }
 }
