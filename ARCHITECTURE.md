@@ -7,16 +7,16 @@ The architecture separates responsibilities into different modules. And it helps
 A typical treasury action follows the flow below.
 
 Governor
-   ↓
+   -->
 ProposalControl
    (proposal lifecycle and confirmations)
-   ↓
+   -->
 Timelock Queue
    (delayed execution scheduling)
-   ↓
+   -->
 Execution Layer
    (transfer, call, or upgrade action)
-   ↓
+   -->
 Target Contract / Token Distribution
 
 Looking at this steps above, each step act as a safeguard that makes sure that protocols validation cannot be bypassed. All proposals must pass through every layer successfully before any action is executed.  
@@ -65,19 +65,19 @@ And only an authorized minter can create a new token or new tokens. And this ens
 
 The system restricts actors that can perform actions and actors that are aunthorized to perform actions.
 
-*** Who can submit proposals? 
+* Who can submit proposals? 
 Only registered governors
 
-*** Who can confirm proposals?
+* Who can confirm proposals?
 Only governors
 
-*** Who can execute proposals?
+* Who can execute proposals?
 Only governors, after the timelock delay.
 
-*** Who can cancel proposals?
+* Who can cancel proposals?
 Only the original proposer.
 
-*** Who can update the Merkle root?
+* Who can update the Merkle root?
 Only the authorized Merkle admin that was set to the governance contract.
 
 Who can mint ARES tokens?
